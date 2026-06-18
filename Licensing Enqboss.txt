@@ -1,0 +1,230 @@
+Plan: Clone Protection & License Activation System for EnqBoss
+Context
+The developer shared this repo publicly on GitHub. The app (EnqBoss — React + Vite + Supabase B2B sales ops tool) has no ownership identity or access control for cloners. The goal is to implement a real offline license activation system where:
+
+Any clone gets a 30-day free trial automatically
+After the first user login, the app generates a unique install hash and emails it to imharsh080@gmail.com via the existing Gmail API
+After 30 days, the app blocks access and shows a "enter your license key" screen
+The admin (imharsh080@gmail.com) receives the hash, converts it to an alphanumeric activation code with a duration suffix, and sends it back to the user
+The user enters the code; the app decodes and verifies it, then activates for the specified duration
+Admin email (hardcoded owner): imharsh080@gmail.com
+Trial period: 30 days from first login
+
+License Flow Diagram
+Clone + deploy
+     ↓
+First user login
+     ↓
+App generates unique install hash (SHA-256 of: Supabase URL + first-login timestamp + browser fingerprint)
+     ↓
+Hash stored in localStorage ("enqboss_install_id")
+     ↓
+App sends email to imharsh080@gmail.com:
+  Subject: "EnqBoss Install — <truncated-hash>"
+  Body: hash + deployed URL + first user email + date
+     ↓
+30-day trial begins (countdown banner visible to all users)
+     ↓
+Day 30: trial expires → full-screen license wall
+     ↓ (user contacts admin)
+Admin encodes activation key:
+  key = Base36(hash_first_8_chars_as_number) + duration_suffix
+  e.g. "K7X2M9PQ-030" (30 days), "K7X2M9PQ-365" (1 year), "K7X2M9PQ-000" (lifetime)
+     ↓
+User enters key into license wall input
+     ↓
+App decodes: extracts hash prefix + duration suffix
+App verifies: decoded hash prefix matches stored install hash prefix
+App stores: activation timestamp + duration in localStorage
+     ↓
+Access restored for licensed duration
+Implementation Details
+1. src/lib/license.ts — License engine (new file)
+const ADMIN_EMAIL = 'imharsh080@gmail.com';
+const TRIAL_DAYS = 30;
+const INSTALL_ID_KEY = 'enqboss_install_id';      // stores the install hash
+const INSTALL_TS_KEY = 'enqboss_install_ts';       // stores first-login timestamp (obfuscated)
+const LICENSE_KEY = 'enqboss_license';             // stores activation data after key entry
+
+export type LicenseStatus = 'ok' | 'trial' | 'expired' | 'licensed';
+
+// Generate install hash: SHA-256(supabaseUrl + timestamp + userAgent slice)
+export async function generateInstallHash(supabaseUrl: string): Promise<string> {
+  const fingerprint = supabaseUrl + navigator.userAgent.slice(0, 20);
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(fingerprint));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+// Called on first login — idempotent
+export async function initLicense(supabaseUrl: string): Promise<string> {
+  let hash = localStorage.getItem(INSTALL_ID_KEY);
+  if (!hash) {
+    hash = await generateInstallHash(supabaseUrl);
+    const tsObf = btoa(String(Date.now() ^ 0xDEADBEEF));
+    localStorage.setItem(INSTALL_ID_KEY, hash);
+    localStorage.setItem(INSTALL_TS_KEY, tsObf);
+  }
+  return hash;
+}
+
+// Read install timestamp
+function getInstallTs(): number {
+  const raw = localStorage.getItem(INSTALL_TS_KEY);
+  if (!raw) return Date.now();
+  try { return parseInt(atob(raw), 10) ^ 0xDEADBEEF; } catch { return Date.now(); }
+}
+
+export function getDaysRemaining(): number {
+  const elapsed = (Date.now() - getInstallTs()) / 86400000;
+  return Math.max(0, Math.ceil(TRIAL_DAYS - elapsed));
+}
+
+// Check license status (admin always 'ok')
+export function getLicenseStatus(userEmail?: string | null): LicenseStatus {
+  if (userEmail === ADMIN_EMAIL) return 'ok';
+  
+  // Check if a valid activation key has been entered
+  const act = localStorage.getItem(LICENSE_KEY);
+  if (act) {
+    try {
+      const { activatedAt, durationDays } = JSON.parse(atob(act));
+      if (durationDays === 0) return 'licensed'; // lifetime
+      const elapsed = (Date.now() - activatedAt) / 86400000;
+      if (elapsed < durationDays) return 'licensed';
+    } catch {}
+  }
+
+  // Fall back to trial
+  const daysLeft = getDaysRemaining();
+  return daysLeft > 0 ? 'trial' : 'expired';
+}
+
+// Activation key format: <8-char-base36-hash-prefix>-<3-digit-duration>
+// e.g. "K7X2M9PQ-030"
+export function activateLicense(key: string): { ok: boolean; error?: string } {
+  const installHash = localStorage.getItem(INSTALL_ID_KEY);
+  if (!installHash) return { ok: false, error: 'No install record found.' };
+
+  const match = key.trim().toUpperCase().match(/^([A-Z0-9]{8})-(\d{3})$/);
+  if (!match) return { ok: false, error: 'Invalid key format. Expected XXXXXXXX-DDD.' };
+
+  const [, keyPrefix, durationStr] = match;
+  
+  // Encode our hash prefix to base36 for comparison
+  const hashNum = parseInt(installHash.slice(0, 8), 16);
+  const expectedPrefix = hashNum.toString(36).toUpperCase().padStart(8, '0').slice(-8);
+  
+  if (keyPrefix !== expectedPrefix) return { ok: false, error: 'Key does not match this installation.' };
+
+  const durationDays = parseInt(durationStr, 10); // 000 = lifetime
+  const activation = btoa(JSON.stringify({ activatedAt: Date.now(), durationDays }));
+  localStorage.setItem(LICENSE_KEY, activation);
+  return { ok: true };
+}
+
+// Helper for admin: given a hash, produce the activation key
+// (This is used only by the admin — can be a small utility or mental model)
+// key = hashNum.toString(36).toUpperCase().padStart(8,'0').slice(-8) + '-' + durationSuffix
+How the admin generates the key: The admin receives the install hash via email. To produce the activation code:
+
+Take first 8 hex chars of the hash → convert to integer → convert to Base36 → uppercase → take last 8 chars → pad to 8
+Append - and 3-digit duration (030, 365, 000 for lifetime)
+Result looks like: K7X2M9PQ-030
+This is documented in a ADMIN_LICENSE_GUIDE.md (committed to the repo root, visible to the admin when they pull).
+
+2. Email notification on first install — src/lib/licenseNotify.ts (new file)
+Uses the existing sendEmail pattern from src/lib/gmail.ts.
+
+Sends one email silently after initLicense() on first login:
+
+To: imharsh080@gmail.com
+Subject: [EnqBoss Install] <hash-prefix> — <userEmail>
+Body:
+  Install Hash: <full-hash>
+  Deployed at: <window.location.origin>
+  First login: <userEmail>
+  Date: <ISO date>
+  Trial expires: <date + 30 days>
+
+  To generate activation key:
+  1. Take first 8 chars of hash: <hash.slice(0,8)>
+  2. parseInt('<hash.slice(0,8)>', 16).toString(36).toUpperCase().slice(-8)
+  3. Append '-' + duration (030/365/000)
+Note: this email is sent using the logged-in user's Gmail token (same as existing quote-send flow). It fires once; subsequent logins skip it because INSTALL_ID_KEY already exists.
+
+3. src/components/LicenseGuard.tsx — Gate UI (new file)
+Three states rendered above everything (wraps <BrowserRouter>):
+
+State: trial — thin top banner (non-blocking):
+
+⏰ Trial — 23 days remaining · Contact imharsh080@gmail.com to license
+State: expired — full-screen overlay (blocking, no way past):
+
+[Clock icon]
+Your 30-day trial has expired
+
+To continue using EnqBoss, contact the owner:
+  imharsh080@gmail.com
+
+Enter your activation key:
+[ XXXXXXXX-DDD        ] [Activate]
+
+[error message if wrong key]
+State: ok / licensed — renders children normally, no UI
+
+State: ok (admin) — renders children with no banner at all
+
+4. Modify src/App.tsx
+<AppProvider>
+  <LicenseGuard>
+    <BrowserRouter>
+      ...
+    </BrowserRouter>
+  </LicenseGuard>
+</AppProvider>
+5. Modify src/store/index.tsx — domain check + license init
+checkUserDomain (line 114): add admin bypass:
+
+const isAdmin = u.email === 'imharsh080@gmail.com';
+const isCompany = u.email.endsWith('@manglarubbers.com');
+if (!isAdmin && !isCompany) {
+  setAuthError('Access restricted. Contact imharsh080@gmail.com.');
+  signOut();
+  return null;
+}
+After successful login (in onAuthStateChange handler): call initLicense() and then sendInstallNotification() (fires once, idempotent). Both are async and can run in background without blocking UI.
+
+6. Ownership watermarks (non-blocking, deterrence)
+index.html <head>:
+
+<!-- EnqBoss — built by Harsh (imharsh080@gmail.com). Licensed software. -->
+src/main.tsx (before createRoot):
+
+console.info('%cEnqBoss', 'font-size:22px;font-weight:bold;color:#c0392b',
+  '\nBuilt by Harsh — imharsh080@gmail.com\nUnlicensed use prohibited.');
+7. ADMIN_LICENSE_GUIDE.md (new file, committed to repo root)
+Documents step-by-step how to:
+
+Recognize an install notification email
+Compute the activation key from the hash
+What duration suffixes mean (000 = lifetime, 030 = 30 days, 365 = 1 year, 180 = 6 months)
+This file stays in the repo so the admin always has the reference.
+
+Critical Files
+Action	File
+Create	src/lib/license.ts
+Create	src/lib/licenseNotify.ts
+Create	src/components/LicenseGuard.tsx
+Create	ADMIN_LICENSE_GUIDE.md
+Modify	src/App.tsx — wrap with <LicenseGuard>
+Modify	src/store/index.tsx — admin bypass in domain check + call initLicense/notify post-login
+Modify	index.html — ownership comment
+Modify	src/main.tsx — console watermark
+Verification
+Fresh install: Clear localStorage entirely → login → banner appears with 30 days remaining; check that imharsh080@gmail.com received the install notification email.
+Admin bypass: Login as imharsh080@gmail.com → no banner, full access.
+Expiry simulation: Set enqboss_install_ts = btoa(String((Date.now() - 31*86400000) ^ 0xDEADBEEF)) in DevTools → refresh → full-screen expiry wall appears.
+License activation: Compute the expected key from the hash in DevTools (see formula in license.ts), enter it → wall disappears, app loads.
+Wrong key: Enter a random key → "Key does not match this installation" error shown.
+Non-company email: Login with someone@gmail.com (not admin) → signed out with access-restricted error.
+Duration suffix 000: Enter a XXXXXXXX-000 key → app stays licensed indefinitely (no expiry check).

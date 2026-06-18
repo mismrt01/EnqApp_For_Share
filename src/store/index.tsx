@@ -84,12 +84,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const openAttachmentModal = (type: 'enquiry' | 'quote' | 'order', id: string) => setAttachmentModal({ type, id });
   const closeAttachmentModal = () => setAttachmentModal({ type: null, id: null });
 
+  // Login is open to any Google account. Authorization (org domain or
+  // allow-list) is enforced after login by SetupGuard + Supabase RLS, so we
+  // no longer reject users at the auth layer.
   const checkUserDomain = (u: User | null) => {
-    if (u && u.email && !u.email.endsWith('@manglarubbers.com')) {
-      setAuthError('Access restricted to @manglarubbers.com users only.');
-      signOut();
-      return null;
-    }
     setAuthError(null);
     return u;
   };

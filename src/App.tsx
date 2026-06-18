@@ -19,6 +19,7 @@ import { Login } from './pages/Login';
 import { SubmitPO } from './pages/SubmitPO';
 import { IntelligenceBoard } from './pages/IntelligenceBoard';
 import { useAppStore } from './store';
+import { SetupGuard } from './components/SetupGuard';
 import { Loader2 } from 'lucide-react';
 
 function AuthWrapper({ children }: { children: React.ReactNode }) {
@@ -53,6 +54,7 @@ export default function App() {
           {/* All other routes require auth */}
           <Route path="/*" element={
             <AuthWrapper>
+              <SetupGuard>
               <Routes>
                 <Route path="/" element={<Layout />}>
                   <Route index element={<Dashboard />} />
@@ -72,6 +74,7 @@ export default function App() {
                   <Route path="*" element={<div className="p-8 text-[13px] font-mono">Module not found...</div>} />
                 </Route>
               </Routes>
+              </SetupGuard>
             </AuthWrapper>
           } />
         </Routes>

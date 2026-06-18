@@ -55,10 +55,10 @@ CREATE TABLE IF NOT EXISTS public.app_settings (
 
 ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow company access" ON public.app_settings;
-CREATE POLICY "Allow company access"
+DROP POLICY IF EXISTS "Allow member access"  ON public.app_settings;
+CREATE POLICY "Allow member access"
 ON public.app_settings FOR ALL TO authenticated
-USING  (auth.jwt() ->> 'email' LIKE '%@manglarubbers.com')
-WITH CHECK (auth.jwt() ->> 'email' LIKE '%@manglarubbers.com');
+USING (is_app_member()) WITH CHECK (is_app_member());
 
 -- Seed initial config
 INSERT INTO public.app_settings (id) VALUES ('config') ON CONFLICT (id) DO NOTHING;
@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS public.authorized_signatories (
 
 ALTER TABLE public.authorized_signatories ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow company access" ON public.authorized_signatories;
-CREATE POLICY "Allow company access"
+DROP POLICY IF EXISTS "Allow member access"  ON public.authorized_signatories;
+CREATE POLICY "Allow member access"
 ON public.authorized_signatories FOR ALL TO authenticated
-USING  (auth.jwt() ->> 'email' LIKE '%@manglarubbers.com')
-WITH CHECK (auth.jwt() ->> 'email' LIKE '%@manglarubbers.com');
+USING (is_app_member()) WITH CHECK (is_app_member());
