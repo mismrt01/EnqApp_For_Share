@@ -15,10 +15,20 @@ export interface TenantConfig {
   id: string;
   company: string | null;
   org_domain: string | null;
+  labels: Record<string, string> | null;
   setup_done: boolean;
   setup_email: string | null;
   install_id: string | null;
 }
+
+// Fields the admin may relabel during setup. key = internal name, value = default.
+export const RELABELABLE: { key: string; default: string }[] = [
+  { key: 'enquiry',  default: 'Enquiry'  },
+  { key: 'quote',    default: 'Quote'    },
+  { key: 'order',    default: 'Order'    },
+  { key: 'customer', default: 'Customer' },
+  { key: 'followup', default: 'Follow-up' },
+];
 
 /** Read tenant config. Returns null if the row/table isn't there yet. */
 export async function getTenantConfig(): Promise<TenantConfig | null> {
@@ -64,6 +74,7 @@ export async function completeSetup(opts: {
   company: string;
   orgDomain: string;       // without leading '@'
   setupEmail: string;
+  labels?: Record<string, string>;  // custom UI labels (rename map)
 }): Promise<{ ok: boolean; error?: string }> {
   const installId = randomInstallId();
   const orgDomain = opts.orgDomain.replace(/^@/, '').trim().toLowerCase();
@@ -72,6 +83,7 @@ export async function completeSetup(opts: {
     id: 'tenant',
     company: opts.company,
     org_domain: orgDomain,
+    labels: opts.labels ?? {},
     setup_done: true,
     setup_email: opts.setupEmail,
     install_id: installId,
