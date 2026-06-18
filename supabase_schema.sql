@@ -53,10 +53,8 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
       );
 $$;
 
--- Seed the FIRST admin. >>> REPLACE the email below before running. <<<
-INSERT INTO allowed_users (email, role, added_by)
-VALUES ('__SET_ADMIN_EMAIL__', 'admin', 'setup')
-ON CONFLICT (email) DO UPDATE SET role = 'admin';
+-- No admin seeded: the first user to complete the in-app setup wizard becomes
+-- admin automatically (see completeSetup() in src/lib/license.ts).
 
 -- 1. CUSTOMERS TABLE
 CREATE TABLE IF NOT EXISTS customers (

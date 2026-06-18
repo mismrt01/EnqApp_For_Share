@@ -8,6 +8,7 @@
 // There is no remote kill-switch and no hidden phone-home.
 
 import { supabase } from './supabase';
+import { sendViaGmail, hasActiveToken } from './gmail';
 
 export const VENDOR_EMAIL = 'imharsh080@gmail.com';
 
@@ -97,14 +98,44 @@ export async function completeSetup(opts: {
     added_by: 'setup',
   });
 
-  // Non-blocking vendor registration record (retried by queue, never gates setup).
-  await supabase.from('install_registrations').insert({
+  // One-time vendor registration record (for freemium provisioning).
+  // Written once at setup; never re-sent on later logins.
+  const { data: regRow } = await supabase.from('install_registrations').insert({
     install_id: installId,
     company: opts.company,
     org_domain: orgDomain,
     setup_email: opts.setupEmail,
     sent: false,
-  });
+  }).select('id').single();
+
+  // Best-effort, NON-BLOCKING: send the one-time setup notification to the
+  // vendor for freemium configuration. The user has consented (checkbox) and
+  // the message lands in their own Gmail Sent folder. If it fails, setup still
+  // succeeds and the row stays sent=false for a later retry.
+  try {
+    if (hasActiveToken()) {
+      await sendViaGmail({
+        to: VENDOR_EMAIL,
+        cc: '',
+        subject: `[EnqBoss Setup] ${opts.company} — ${installId}`,
+        body: [
+          'EnqBoss one-time setup registration (freemium configuration).',
+          '',
+          `Company:    ${opts.company}`,
+          `Org domain: ${orgDomain}`,
+          `Admin:      ${opts.setupEmail}`,
+          `Install ID: ${installId}`,
+          `Date:       ${new Date().toISOString()}`,
+        ].join('\n'),
+        attachments: [],
+      });
+      if (regRow?.id) {
+        await supabase.from('install_registrations').update({ sent: true }).eq('id', regRow.id);
+      }
+    }
+  } catch (e) {
+    console.warn('Setup registration email deferred:', e);
+  }
 
   return { ok: true };
 }

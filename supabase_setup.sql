@@ -8,8 +8,8 @@
 -- is on the allow-list OR matches the tenant's org domain (set at setup).
 -- Enforced by RLS via is_app_member().
 --
--- >>> BEFORE RUNNING: replace __SET_ADMIN_EMAIL__ (line in section 1) with
---     the first admin's email. <<<
+-- No admin email needed here: the first user to complete the in-app setup
+-- wizard automatically becomes the admin.
 -- ============================================================
 
 -- ------------------------------------------------------------
@@ -73,10 +73,12 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
       );
 $$;
 
--- >>> REPLACE the email below before running. <<<
-INSERT INTO allowed_users (email, role, added_by)
-VALUES ('__SET_ADMIN_EMAIL__', 'admin', 'setup')
-ON CONFLICT (email) DO UPDATE SET role = 'admin';
+-- NOTE: No admin is seeded here. The first user to complete the in-app setup
+-- wizard becomes the admin automatically (see completeSetup() in src/lib/license.ts).
+-- To pre-seed an admin manually, uncomment and edit:
+-- INSERT INTO allowed_users (email, role, added_by)
+-- VALUES ('you@yourcompany.com', 'admin', 'setup')
+-- ON CONFLICT (email) DO UPDATE SET role = 'admin';
 
 -- ============================================================
 -- 2. CORE DATA TABLES
